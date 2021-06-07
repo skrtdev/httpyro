@@ -1,0 +1,7 @@
+starlette==0.14.2
+janus==0.6.1
+Pyrogram==1.2.9
+requests==2.25.1
+fastapi==0.65.1
+uvicorn==0.13.4
+python-multipart==0.0.5
