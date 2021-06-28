@@ -106,7 +106,7 @@ class HTTPyro:
             @client.on_callback_query()
             async def handler(client: Client, update: Union[Message, InlineQuery, CallbackQuery]):
                 m = re.search('.+\.(.+)\'', str(type(update)))
-                botapi_update = {camel_to_snake(m.group(1)): normalize_response(update),
+                botapi_update = {await camel_to_snake(m.group(1)): await normalize_response(update),
                                  'update_id': 0}  # fixme update_id 0
                 await HTTPyro.updates_queue[token].put(
                     botapi_update) if client.bot_token in HTTPyro.webhooks else HTTPyro.updates[token].append(
