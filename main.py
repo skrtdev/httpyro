@@ -20,16 +20,16 @@ from starlette.responses import RedirectResponse
 app = FastAPI()
 
 
-def camel_to_snake(string: str) -> str:
+async def camel_to_snake(string: str) -> str:
     return re.sub(r'(?<!^)(?=[A-Z])', '_', string).lower()
 
 
-def normalize_args(args: dict):
+async def normalize_args(args: dict):
     for arg in args.items():
         key = arg[0]
         value = arg[1]
 
-        if key == 'reply_markup':
+        if key == 'reply_markup' and value:
             value = json.loads(value) if isinstance(value, str) else value
             if isinstance(value, dict) and 'inline_keyboard' in value:
                 nrow = 0
@@ -48,7 +48,7 @@ def normalize_args(args: dict):
     return args
 
 
-def normalize_response(res):
+async def normalize_response(res):
     if isinstance(res, bool):
         return res
     # print(res)
@@ -59,13 +59,16 @@ def normalize_response(res):
             datetime.strptime(res['edit_date'], "%Y-%m-%d %H:%M:%S").timetuple())
         if 'forward_date' in res: res['forward_date'] = mktime(
             datetime.strptime(res['forward_date'], "%Y-%m-%d %H:%M:%S").timetuple())
+    if res['_'] == 'ChatPhoto':
+        res['small_file_unique_id'] = res['small_photo_unique_id']
+        res['big_file_unique_id'] = res['big_photo_unique_id']
     if 'from_user' in res:
         res['from'] = res['from_user']
     for arg in res.items():
         key = arg[0]
         value = arg[1]
         if isinstance(value, dict):
-            res[key] = normalize_response(value)
+            res[key] = await normalize_response(value)
 
     return res
 
@@ -129,13 +132,13 @@ def read_root():
     return RedirectResponse(url='http://skrtdev.tk')
 
 
-def call_method(client: Client, name: str, args):
+async def call_method(client: Client, name: str, args):
     if name == 'deleteMessage' or name == 'forwardMessage':
         name += 's'
         args['message_ids'] = int(args['message_id'])
 
-    method = getattr(client, camel_to_snake(name))
-    args = normalize_args(args)
+    method = getattr(client, await camel_to_snake(name))
+    args = await normalize_args(args)
 
     real_args = {}
     for item in inspect.signature(method).parameters.items():
@@ -144,7 +147,7 @@ def call_method(client: Client, name: str, args):
         if real_arg in args:
             real_args[real_arg] = int(args[real_arg]) if item[1].annotation is int else args[real_arg]
 
-    return method(**real_args)
+    return await method(**real_args)
 
 
 @app.get("/bot{token}/getUpdates")
@@ -170,15 +173,19 @@ async def get_updates(token: str, request: Request, timeout: int = 0):
 @app.get("/bot{token}/getWebhookInfo")
 @app.post("/bot{token}/getWebhookInfo")
 async def get_webhook_info(token: str):
-    return {'ok': True, 'result': {'url': ''}}
+    return {'ok': True, 'result': {'url': '', 'has_custom_certificate': False, 'pending_update_count': 0}}
 
 
 async def worker(client: Client, url: str, queue):
     while True:
         update = await queue.get()
 
+        print('processing update')
+        try:
+            r = requests.get(url, data=json.dumps(update).encode('utf-8'), timeout=3)
+        except Exception as e:
+            continue
         print('processed update')
-        r = requests.post(url, data=json.dumps(update).encode('utf-8'))
         try:
             res = r.json()
             await call_method(client, res['method'], res)
@@ -227,10 +234,10 @@ async def method(token: str, method: str, request: Request):
         args[param[0]] = param[1]
     for param in (await request.form()).items():
         args[param[0]] = param[1]
-    client = await HTTPyro.get_client(token)
 
     try:
-        return {'ok': True, 'result': normalize_response(await call_method(client, method, args))}
+        return {'ok': True,
+                'result': await normalize_response(await call_method(await HTTPyro.get_client(token), method, args))}
     except Exception as e:
         print(e)
         error_code = 400
